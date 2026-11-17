@@ -1,0 +1,16 @@
+node_modules/
+.next/
+dist/
+build/
+.env
+.env.*
+!.env.example
+packages/**/.env
+workers/**/.env
+apps/**/.env
+*.log
+.DS_Store
+coverage/
+.turbo/
+prisma/*.db
+data/

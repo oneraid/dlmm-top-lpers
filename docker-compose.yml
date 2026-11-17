@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: dlmm
+      POSTGRES_PASSWORD: dlmm
+      POSTGRES_DB: dlmm_top_lpers
+    ports: ["5432:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dlmm"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    ports: ["6379:6379"]
+    volumes: ["redisdata:/data"]
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    profiles: ["app"]
+    environment:
+      DATABASE_URL: postgresql://dlmm:dlmm@postgres:5432/dlmm_top_lpers
+    ports: ["3000:3000"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  worker:
+    build:
+      context: .
+      dockerfile: workers/Dockerfile
+    profiles: ["app"]
+    environment:
+      DATABASE_URL: postgresql://dlmm:dlmm@postgres:5432/dlmm_top_lpers
+      REDIS_URL: redis://redis:6379
+      RPC_PUBLIC_ENDPOINTS: https://api.mainnet-beta.solana.com
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+
+volumes:
+  pgdata:
+  redisdata:

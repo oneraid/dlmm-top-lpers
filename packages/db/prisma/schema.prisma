@@ -1,0 +1,172 @@
+// DLMM Top LPers — database schema. Source of truth: IMPLEMENTATION.md Bab 5.
+// Ranking priority: #1 Win Rate 7D/30D (Wilson-adjusted), #2 PnL.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Pool {
+  address        String    @id
+  name           String
+  tokenX         String    @map("token_x")
+  tokenY         String    @map("token_y")
+  binStep        Int       @map("bin_step")
+  baseFeePct     Float     @map("base_fee_pct")
+  tvlUsd         Float     @default(0) @map("tvl_usd")
+  volume24hUsd   Float     @default(0) @map("volume_24h_usd")
+  fees24hUsd     Float     @default(0) @map("fees_24h_usd")
+  feeTvlRatio24h Float     @default(0) @map("fee_tvl_ratio_24h")
+  isBlacklisted  Boolean   @default(false) @map("is_blacklisted")
+  isTracked      Boolean   @default(false) @map("is_tracked")
+  lastScannedAt  DateTime? @map("last_scanned_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+  positions      Position[]
+
+  @@index([feeTvlRatio24h(sort: Desc)])
+  @@map("pools")
+}
+
+model Wallet {
+  address       String    @id
+  firstSeenAt   DateTime  @default(now()) @map("first_seen_at")
+  lastActiveAt  DateTime? @map("last_active_at")
+  profiledAt    DateTime? @map("profiled_at")
+  profileStatus String    @default("queued") @map("profile_status") // queued|profiling|done|failed|stale
+  flags         String[]  @default([])
+  notes         String?
+  positions     Position[]
+  stats         WalletWindowStat[]
+
+  @@index([lastActiveAt(sort: Desc)])
+  @@map("wallets")
+}
+
+model Position {
+  address       String    @id
+  walletAddress String    @map("wallet_address")
+  poolAddress   String    @map("pool_address")
+  status        String // open | closed
+  lowerBinId    Int       @map("lower_bin_id")
+  upperBinId    Int       @map("upper_bin_id")
+  createdAt     DateTime  @map("created_at")
+  closedAt      DateTime? @map("closed_at")
+  holdMinutes   Float?    @map("hold_minutes")
+  depositedSol  Float?    @map("deposited_sol")
+  withdrawnSol  Float?    @map("withdrawn_sol")
+  feesEarnedSol Float     @default(0) @map("fees_earned_sol")
+  pnlSol        Float?    @map("pnl_sol")
+  pnlUsd        Float?    @map("pnl_usd")
+  pnlPct        Float?    @map("pnl_pct")
+  truePnlSol    Float?    @map("true_pnl_sol")
+  isWin         Boolean?  @map("is_win")
+  rawPayload    Json?     @map("raw_payload")
+  wallet        Wallet    @relation(fields: [walletAddress], references: [address], onDelete: Cascade)
+  pool          Pool      @relation(fields: [poolAddress], references: [address], onDelete: Cascade)
+
+  @@index([walletAddress, closedAt(sort: Desc)])
+  @@index([poolAddress, status])
+  @@map("positions")
+}
+
+model WalletWindowStat {
+  walletAddress     String   @map("wallet_address")
+  windowDays        Int      @map("window_days") // 7 | 30 | 90
+  closedCount       Int      @default(0) @map("closed_count")
+  wins              Int      @default(0)
+  losses            Int      @default(0)
+  flats             Int      @default(0)
+  winRateRaw        Float    @default(0) @map("win_rate_raw")
+  winRateAdj        Float    @default(0) @map("win_rate_adj")
+  pnlSol            Float    @default(0) @map("pnl_sol")
+  pnlUsd            Float    @default(0) @map("pnl_usd")
+  feesEarnedSol     Float    @default(0) @map("fees_earned_sol")
+  feeShare          Float    @default(0) @map("fee_share")
+  evPerPositionSol  Float    @default(0) @map("ev_per_position_sol")
+  profitFactor      Float?   @map("profit_factor")
+  medianPnlSol      Float    @default(0) @map("median_pnl_sol")
+  topTradeShare     Float    @default(0) @map("top_trade_share")
+  avgHoldMinutes    Float    @default(0) @map("avg_hold_minutes")
+  medianHoldMinutes Float    @default(0) @map("median_hold_minutes")
+  medianPositionSol Float    @default(0) @map("median_position_sol")
+  distinctPools     Int      @default(0) @map("distinct_pools")
+  openCount         Int      @default(0) @map("open_count")
+  openUnrealizedSol Float    @default(0) @map("open_unrealized_sol")
+  computedAt        DateTime @default(now()) @map("computed_at")
+  wallet            Wallet   @relation(fields: [walletAddress], references: [address], onDelete: Cascade)
+
+  @@id([walletAddress, windowDays])
+  @@map("wallet_window_stats")
+}
+
+model RankingSnapshot {
+  id         BigInt         @id @default(autoincrement())
+  snapshotAt DateTime       @default(now()) @map("snapshot_at")
+  mode       String // lexicographic | composite
+  entries    RankingEntry[]
+
+  @@map("ranking_snapshots")
+}
+
+model RankingEntry {
+  snapshotId     BigInt          @map("snapshot_id")
+  walletAddress  String          @map("wallet_address")
+  rank           Int             @default(0)
+  winScore       Float           @map("win_score")
+  compositeScore Float?          @map("composite_score")
+  passedFilters  Boolean         @map("passed_filters")
+  failedFilters  String[]        @default([]) @map("failed_filters")
+  snapshot       RankingSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, walletAddress])
+  @@map("ranking_entries")
+}
+
+model WatchlistItem {
+  walletAddress String   @id @map("wallet_address")
+  label         String?
+  copyRatioHint Float?   @map("copy_ratio_hint")
+  addedAt       DateTime @default(now()) @map("added_at")
+
+  @@map("watchlist")
+}
+
+model PriceSnapshot {
+  mint     String
+  at       DateTime
+  priceUsd Float    @map("price_usd")
+
+  @@id([mint, at])
+  @@map("price_snapshots")
+}
+
+model ScoringConfig {
+  key   String @id
+  value Json
+
+  @@map("scoring_config")
+}
+
+model JobRun {
+  id         BigInt    @id @default(autoincrement())
+  jobName    String    @map("job_name")
+  status     String // running | done | failed | partial
+  startedAt  DateTime  @default(now()) @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+  detail     Json?
+
+  @@index([jobName, startedAt(sort: Desc)])
+  @@map("job_runs")
+}
+
+model ScanCheckpoint {
+  jobName     String   @id @map("job_name")
+  cursor      String? // e.g. last pool address scanned in walletDiscovery
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("scan_checkpoints")
+}

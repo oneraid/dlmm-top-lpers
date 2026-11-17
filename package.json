@@ -1,0 +1,17 @@
+{
+  "name": "dlmm-top-lpers",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Find consistently profitable Meteora DLMM LPs. Ranking priority: #1 Win Rate 7D/30D (Wilson-adjusted), #2 PnL. See IMPLEMENTATION.md.",
+  "workspaces": ["apps/*", "workers", "packages/*"],
+  "scripts": {
+    "dev": "npm run dev -w apps/web",
+    "dev:worker": "npm run dev -w workers",
+    "build": "npm run build -w apps/web && npm run build -w workers",
+    "test": "npm run test -w workers",
+    "db:generate": "npm run generate -w @dlmm/db",
+    "db:migrate": "npm run migrate -w @dlmm/db",
+    "db:seed": "npm run seed -w @dlmm/db"
+  },
+  "engines": { "node": ">=20" }
+}
