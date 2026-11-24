@@ -64,3 +64,41 @@ Catatan langkah verifikasi, kendala, dan perbaikan saat menjalankan project seca
   1. `npm run job:profile -w workers`: 50 wallet diprofil, 4.365 posisi tersimpan, statistik window (7D, 30D, 90D) terhitung.
   2. `npm run job:scoring -w workers`: Berhasil membuat ranking snapshot, 36 wallet lolos hard filters.
   3. Leaderboard di `http://localhost:3000/` aktif dan menampilkan tabel peringkat wallet top LPer secara real-time.
+
+
+---
+
+### [2026-11-17] Job gagal tanpa DATABASE_URL — loader .env di entry point
+- **Masalah:**
+  - `npm run job:pools -w workers` gagal dengan `Environment variable not found: DATABASE_URL`
+    (Prisma, `schema.prisma:10`), padahal `.env` di repo root sudah berisi `DATABASE_URL`.
+  - Penyebab: npm workspace menjalankan job dengan cwd `workers/`, dan Prisma Client
+    hanya membaca `process.env` — tidak ada yang memuat `.env` repo root.
+- **Solusi (tanpa dependensi baru):**
+  - `workers/src/loadEnv.ts` (baru): parser `.env` minimal, memuat `.env` repo root
+    hanya untuk variabel yang belum ada di environment shell.
+  - `import "./loadEnv.js"` sebagai baris pertama di `workers/src/run-job.ts` dan
+    `workers/src/index.ts` — harus sebelum Prisma Client dikonstruksi saat import.
+- **Verifikasi:** `env -u DATABASE_URL npm run job:pools -w workers` → `{ pools: 175, tracked: 50 }`.
+
+
+### [2026-11-18 00:58 WIB] Siklus pantau: hard filter PnL 30D > 0
+- **Temuan:** snapshot scoring sebelum perbaikan menempatkan `CChKWmePHV67WdLJozgAWM3VYeSdh4fH73FwsQMgxTnB` di rank #1 (WR30 98.6%, 73W/1L) padahal `pnl_sol_30d = -0.47 SOL`. `evaluateHardFilters` tidak punya gate PnL — `pnlEpsilonSol` hanya dipakai untuk klasifikasi win/flat/loss per posisi. Aturan user (17 Nov): wallet PnL negatif tidak boleh jadi kandidat.
+- **Perbaikan:** `workers/src/scoring/filters.ts` — tambah gate `s30.pnlSol <= cfg.pnlEpsilonSol` → `failed: pnl_30d=...`. Pakai nilai config yang sudah ada (0.001 SOL), tanpa key baru. Unit test baru di `workers/tests/scoring.test.ts` (wallet WR 96% tapi PnL -4.76 SOL harus gagal `pnl_30d`). `IMPLEMENTATION.md` Bab 2.5 ditambah baris filter yang sama.
+- **Bonus:** `workers/tests/scoring.test.js` (hasil compile basi dari 17 Nov 00:21, duplikat `.ts`) membuat `npm test` gagal — dihapus, `npm test` sekarang hijau 6/6.
+- **Verifikasi:** `npm run job:scoring` ulang → `passed: 206 → 141`; `CChKWme...` kini `passed_filters=false` (`pnl_30d=-0.474 SOL (<=0.001)`); rank #1 baru `FehDPJwU9mAVmv2epKLWNwHBV7bCSBSNCzMmWhmjv6Ce` WR 97.0% (96W/3L), +24.14 SOL, 1 open.
+- **Pipeline siklus ini:** pools 177 (tracked 50), wallets 820 terlihat / 50 pool, profile 49/50 (1 gagal: `2iMiwyoshs5hktq19zysagdQ9dEQ5ZZV2jFEahvQb2m5`, `TypeError: terminated` / HTTPParserError saat fetch Meteora API — retry siklus berikut), scoring 297 wallet.
+
+
+---
+
+### [2026-11-18 12:58 WIB] Siklus pantau: pipeline resume-aware (System Improvement #4)
+- **Masalah:** VM workspace di-replace 2x hari ini (05:08 dan 13:02 WIB) di tengah
+  pipeline; job `walletDiscovery` siklus 12:58 mati diam-diam saat reset 13:02 WIB
+  dan harus diulang manual dari awal (pipeline penuh ~30-40 mnt).
+- **Solusi:** `run-pipeline.sh` (baru, di repo root) — mencatat progres per job
+  sebagai marker file persisten di `$HOME/.dlmm-pipeline-<cycle>.<job>.done` dan
+  melewati job yang sudah selesai untuk ID siklus yang sama. Panggil ulang dengan
+  ID siklus yang sama untuk resume: `./run-pipeline.sh 2026-11-18-1258`.
+- **Verifikasi:** mode `test-skip` (4 marker palsu) → semua job SKIP, exit 0.
+  Dipakai untuk menjalankan ulang pipeline siklus ini pasca-reset 13:02 WIB.

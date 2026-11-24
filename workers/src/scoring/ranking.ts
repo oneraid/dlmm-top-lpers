@@ -1,9 +1,11 @@
 import type { WindowStats } from "./aggregateStats.js";
-import { evaluateHardFilters, winScore, type ScoringConfig } from "./filters.js";
+import { evaluateCopyReady, evaluateHardFilters, winScore, type ScoringConfig } from "./filters.js";
 
 export interface RankingCandidate {
   walletAddress: string;
   lastActiveAt: Date | null;
+  /** MAX(closed_at) posisi closed wallet ini — dasar aturan copy-ready 3 hari (user, 2026-11-24). */
+  lastClosedAt: Date | null;
   stats7: WindowStats;
   stats30: WindowStats;
 }
@@ -13,6 +15,7 @@ export interface RankingResult extends RankingCandidate {
   compositeScore: number;
   passedFilters: boolean;
   failedFilters: string[];
+  copyReady: boolean;
   rank: number; // 0 = not ranked (failed filters)
 }
 
@@ -39,6 +42,7 @@ export function buildRanking(candidates: RankingCandidate[], cfg: ScoringConfig,
       compositeScore: 100 * (0.7 * ws + 0.2 * logNorm + 0.1 * pfNorm),
       passedFilters: failed.length === 0,
       failedFilters: failed,
+      copyReady: evaluateCopyReady(c.stats30, c.lastClosedAt, failed.length === 0, now),
       rank: 0,
     };
   });

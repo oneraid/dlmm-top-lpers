@@ -157,16 +157,27 @@ export async function profileWallet(walletAddress: string): Promise<void> {
 
 /** Drain a batch of queued wallets (priority ordering added in Sprint-1: watchlist first). */
 export async function walletProfilerBatch(limit = 50): Promise<{ profiled: number }> {
-  const queued = await prisma.wallet.findMany({
-    where: { profileStatus: { in: ["queued", "stale"] } },
-    orderBy: { firstSeenAt: "asc" },
-    take: limit,
-    select: { address: true },
-  });
-  let ok = 0;
-  for (const w of queued) {
-    try { await profileWallet(w.address); ok++; }
-    catch (err) { console.error(`[walletProfiler] ${w.address} failed:`, err); }
+  // Siklus 08:58 18 Nov: catat ke job_runs seperti poolDiscovery/walletDiscovery
+  // (sebelumnya job ini tak terlacak — riwayat pipeline di DB bolong).
+  const run = await prisma.jobRun.create({ data: { jobName: "walletProfiler", status: "running" } });
+  try {
+    const queued = await prisma.wallet.findMany({
+      where: { profileStatus: { in: ["queued", "stale"] } },
+      orderBy: { firstSeenAt: "asc" },
+      take: limit,
+      select: { address: true },
+    });
+    let ok = 0;
+    for (const w of queued) {
+      try { await profileWallet(w.address); ok++; }
+      catch (err) { console.error(`[walletProfiler] ${w.address} failed:`, err); }
+    }
+    await prisma.jobRun.update({ where: { id: run.id }, data: { status: "done", finishedAt: new Date(),
+      detail: { profiled: ok } } });
+    return { profiled: ok };
+  } catch (err) {
+    await prisma.jobRun.update({ where: { id: run.id }, data: { status: "failed", finishedAt: new Date(),
+      detail: { error: err instanceof Error ? err.message : String(err) } } });
+    throw err;
   }
-  return { profiled: ok };
 }

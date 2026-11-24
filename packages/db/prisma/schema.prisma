@@ -108,6 +108,7 @@ model RankingSnapshot {
   snapshotAt DateTime       @default(now()) @map("snapshot_at")
   mode       String // lexicographic | composite
   entries    RankingEntry[]
+  stats      SnapshotWalletStat[]
 
   @@map("ranking_snapshots")
 }
@@ -120,10 +121,41 @@ model RankingEntry {
   compositeScore Float?          @map("composite_score")
   passedFilters  Boolean         @map("passed_filters")
   failedFilters  String[]        @default([]) @map("failed_filters")
+  copyReady      Boolean         @default(false) @map("copy_ready")
   snapshot       RankingSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
 
   @@id([snapshotId, walletAddress])
   @@map("ranking_entries")
+}
+
+model SnapshotWalletStat {
+  snapshotId        BigInt          @map("snapshot_id")
+  walletAddress     String          @map("wallet_address")
+  windowDays        Int             @map("window_days") // 7 | 30
+  closedCount       Int             @default(0) @map("closed_count")
+  wins              Int             @default(0)
+  losses            Int             @default(0)
+  flats             Int             @default(0)
+  winRateRaw        Float           @default(0) @map("win_rate_raw")
+  winRateAdj        Float           @default(0) @map("win_rate_adj")
+  pnlSol            Float           @default(0) @map("pnl_sol")
+  pnlUsd            Float           @default(0) @map("pnl_usd")
+  feesEarnedSol     Float           @default(0) @map("fees_earned_sol")
+  feeShare          Float           @default(0) @map("fee_share")
+  evPerPositionSol  Float           @default(0) @map("ev_per_position_sol")
+  profitFactor      Float?          @map("profit_factor")
+  medianPnlSol      Float           @default(0) @map("median_pnl_sol")
+  topTradeShare     Float           @default(0) @map("top_trade_share")
+  avgHoldMinutes    Float           @default(0) @map("avg_hold_minutes")
+  medianHoldMinutes Float           @default(0) @map("median_hold_minutes")
+  medianPositionSol Float           @default(0) @map("median_position_sol")
+  distinctPools     Int             @default(0) @map("distinct_pools")
+  openCount         Int             @default(0) @map("open_count")
+  openUnrealizedSol Float           @default(0) @map("open_unrealized_sol")
+  snapshot          RankingSnapshot @relation(fields: [snapshotId], references: [id], onDelete: Cascade)
+
+  @@id([snapshotId, walletAddress, windowDays])
+  @@map("snapshot_wallet_stats")
 }
 
 model WatchlistItem {

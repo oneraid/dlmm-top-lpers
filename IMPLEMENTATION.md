@@ -149,6 +149,7 @@ wallet dengan WinScore hampir sama tapi PnL beda jauh. Default tetap leksikograf
 |---|---|---|
 | `closed_30d >= 20` | 20 (bisa diatur 10–50) | Di bawah ini Win Rate tidak punya makna statistik |
 | `closed_7d >= 3` | 3 | Bukti masih aktif & form terkini ada |
+| `pnl_sol_30d > epsilon` | epsilon = 0.001 SOL | Wallet Win Rate tinggi tapi total PnL negatif tidak boleh jadi kandidat copy-trade (aturan user 17 Nov 2026; ditambahkan 18 Nov 2026 setelah wallet WR 98.6% / PnL -0.47 SOL sempat ranking #1) |
 | `last_active_at <= 7 hari lalu` | 7 hari | Leader yang sudah pensiun tidak berguna untuk di-copy |
 | `fee_share >= 0.10` | 10% | `total_fees / max(total_fees + gross_price_gain, epsilon)`. Di bawah ini profit kemungkinan besar dari pergerakan harga / token sendiri, bukan skill LP |
 | `top_trade_share <= 0.35` | 35% | PnL posisi terbesar / total PnL positif. Di atas ini = terkonsentrasi, rawan "sekali hoki" |

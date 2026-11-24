@@ -24,25 +24,69 @@ function toStats(row: {
 }
 
 export async function scoringRun(): Promise<{ wallets: number; passed: number }> {
-  const cfg = await loadConfig();
-  const wallets = await prisma.wallet.findMany({ where: { profileStatus: "done" }, include: { stats: true } });
-  const candidates: RankingCandidate[] = [];
-  for (const w of wallets) {
-    const s7 = w.stats.find((s) => s.windowDays === 7);
-    const s30 = w.stats.find((s) => s.windowDays === 30);
-    if (!s7 || !s30) continue;
-    candidates.push({ walletAddress: w.address, lastActiveAt: w.lastActiveAt, stats7: toStats(s7), stats30: toStats(s30) });
-  }
-  const results = buildRanking(candidates, cfg);
-  const snapshot = await prisma.rankingSnapshot.create({ data: { mode: cfg.rankingMode } });
-  for (const r of results) {
-    await prisma.rankingEntry.create({
-      data: {
-        snapshotId: snapshot.id, walletAddress: r.walletAddress, rank: r.rank,
-        winScore: r.winScore, compositeScore: r.compositeScore,
-        passedFilters: r.passedFilters, failedFilters: r.failedFilters,
-      },
+  // Siklus 08:58 18 Nov: catat ke job_runs seperti poolDiscovery/walletDiscovery
+  // (sebelumnya job ini tak terlacak — riwayat pipeline di DB bolong).
+  const run = await prisma.jobRun.create({ data: { jobName: "scoringRun", status: "running" } });
+  try {
+    const cfg = await loadConfig();
+    const wallets = await prisma.wallet.findMany({ where: { profileStatus: "done" }, include: { stats: true } });
+    // MAX(closed_at) per wallet — dasar aturan copy-ready 3 hari (user,
+    // 2026-11-24): tidak ada posisi close dalam 72 jam terakhir sebelum
+    // snapshot = keluar dari copy-ready (tetap di-skor/di-track).
+    const lastClosedRows = await prisma.position.groupBy({
+      by: ["walletAddress"],
+      where: { status: "closed", closedAt: { not: null } },
+      _max: { closedAt: true },
     });
+    const lastClosedByWallet = new Map(lastClosedRows.map((r) => [r.walletAddress, r._max.closedAt]));
+    const candidates: RankingCandidate[] = [];
+    for (const w of wallets) {
+      const s7 = w.stats.find((s) => s.windowDays === 7);
+      const s30 = w.stats.find((s) => s.windowDays === 30);
+      if (!s7 || !s30) continue;
+      candidates.push({ walletAddress: w.address, lastActiveAt: w.lastActiveAt,
+        lastClosedAt: lastClosedByWallet.get(w.address) ?? null, stats7: toStats(s7), stats30: toStats(s30) });
+    }
+    const results = buildRanking(candidates, cfg);
+    const snapshot = await prisma.rankingSnapshot.create({ data: { mode: cfg.rankingMode } });
+    for (const r of results) {
+      await prisma.rankingEntry.create({
+        data: {
+          snapshotId: snapshot.id, walletAddress: r.walletAddress, rank: r.rank,
+          winScore: r.winScore, compositeScore: r.compositeScore,
+          passedFilters: r.passedFilters, failedFilters: r.failedFilters,
+          copyReady: r.copyReady,
+        },
+      });
+    }
+    // Freeze-stats (#55, diterapkan #56): bekukan salinan WindowStats 7D/30D
+    // tiap kandidat bersama snapshot, agar angka di balik ranking bisa
+    // direproduksi walau wallet_window_stats ditimpa profiler run berikutnya.
+    for (const r of results) {
+      for (const s of [r.stats7, r.stats30]) {
+        await prisma.snapshotWalletStat.create({
+          data: {
+            snapshotId: snapshot.id, walletAddress: r.walletAddress,
+            windowDays: s.windowDays, closedCount: s.closedCount, wins: s.wins,
+            losses: s.losses, flats: s.flats, winRateRaw: s.winRateRaw,
+            winRateAdj: s.winRateAdj, pnlSol: s.pnlSol, pnlUsd: s.pnlUsd,
+            feesEarnedSol: s.feesEarnedSol, feeShare: s.feeShare,
+            evPerPositionSol: s.evPerPositionSol, profitFactor: s.profitFactor,
+            medianPnlSol: s.medianPnlSol, topTradeShare: s.topTradeShare,
+            avgHoldMinutes: s.avgHoldMinutes, medianHoldMinutes: s.medianHoldMinutes,
+            medianPositionSol: s.medianPositionSol, distinctPools: s.distinctPools,
+            openCount: s.openCount, openUnrealizedSol: s.openUnrealizedSol,
+          },
+        });
+      }
+    }
+    const out = { wallets: results.length, passed: results.filter((r) => r.passedFilters).length };
+    await prisma.jobRun.update({ where: { id: run.id }, data: { status: "done", finishedAt: new Date(),
+      detail: out } });
+    return out;
+  } catch (err) {
+    await prisma.jobRun.update({ where: { id: run.id }, data: { status: "failed", finishedAt: new Date(),
+      detail: { error: err instanceof Error ? err.message : String(err) } } });
+    throw err;
   }
-  return { wallets: results.length, passed: results.filter((r) => r.passedFilters).length };
 }

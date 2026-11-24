@@ -1,4 +1,5 @@
 // Run a single job once, e.g.: npm run job:pools  |  tsx src/run-job.ts walletProfiler
+import "./loadEnv.js"; // must stay first: loads repo-root .env before Prisma is constructed
 import { poolDiscovery, walletDiscovery, walletProfilerBatch, scoringRun, priceSnapshot } from "./jobs/index.js";
 
 const name = process.argv[2];

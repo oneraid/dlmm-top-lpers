@@ -1,3 +1,4 @@
+import "./loadEnv.js"; // must stay first: loads repo-root .env before Prisma/config are read
 import { Queue, Worker } from "bullmq";
 import IORedis from "ioredis";
 import { config } from "./config.js";
